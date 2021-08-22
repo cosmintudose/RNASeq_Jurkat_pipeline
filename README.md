@@ -76,3 +76,5 @@ enrichplotgplots
 - contain DGE analysis, GSEA, GO
 
 7. Venns_diif_expressed_genes_jurkat.R - For venns showing overlap between wt_vs_a7 AND wt_vs_c9
+
+Aknowledgement: pipeline derived from https://diytranscriptomics.com/
