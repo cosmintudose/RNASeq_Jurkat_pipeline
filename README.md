@@ -5,6 +5,7 @@ RNA-Seq pipeline Jurkat cell-line EZH2-KO experiment: alignment, QC, DGE analysi
 
 - Kallisto 
 ```sudo apt install -y kallisto```
+
 If command doesn't work, check for requirements: https://pachterlab.github.io/kallisto/source
 
 - FastQC
@@ -21,6 +22,7 @@ wget http://ftp.ensembl.org/pub/release-104/fasta/homo_sapiens/cdna/Homo_sapiens
 3. Run kallisto_quant.sh 
 
 This quantifies the number of reads in each sample, the abundance.tsv file for each sample will be used in the downstream analysis
+
 The multiqc step (check code) will merge the fastqc files into one .html to inspect the QC of the samples
 ```
 sh kallisto_quant.sh
