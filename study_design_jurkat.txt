@@ -1,0 +1,10 @@
+sample	phenotype
+A10	Jurkat_a7
+A11	Jurkat_wt
+A12	Jurkat_wt
+A13	Jurkat_wt
+A14	Jurkat_a7
+A15	Jurkat_a7
+A16	Jurkat_c9
+A17	Jurkat_c9
+A18	Jurkat_c9
