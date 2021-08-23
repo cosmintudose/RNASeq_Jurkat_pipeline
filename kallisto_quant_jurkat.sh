@@ -6,9 +6,9 @@ echo "fastqc finished"
 kallisto index -i Homo_sapiens.GRCh38.cdna.all.index Homo_sapiens.GRCh38.cdna.all.fa #change name if a different version, do the same downstream
 echo "Index built"
 
-#pseudoalignment and output in separate directories - this version also creates .bam files, but they're not necessary
-kallisto quant -i Homo_sapiens.GRCh38.cdna.all.index -o A11 -t 4 A11_1.fq.gz A11_2.fq.gz &> A11.log
+#pseudoalignment and output in separate directories
 kallisto quant -i Homo_sapiens.GRCh38.cdna.all.index -o A10 -t 4 A10_1.fq.gz A10_2.fq.gz &> A10.log
+kallisto quant -i Homo_sapiens.GRCh38.cdna.all.index -o A11 -t 4 A11_1.fq.gz A11_2.fq.gz &> A11.log
 kallisto quant -i Homo_sapiens.GRCh38.cdna.all.index -o A12 -t 4 A12_1.fq.gz A12_2.fq.gz &> A12.log
 kallisto quant -i Homo_sapiens.GRCh38.cdna.all.index -o A13 -t 4 A13_1.fq.gz A13_2.fq.gz &> A13.log
 kallisto quant -i Homo_sapiens.GRCh38.cdna.all.index -o A14 -t 4 A14_1.fq.gz A14_2.fq.gz &> A14.log
