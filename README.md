@@ -29,6 +29,7 @@ sh kallisto_quant.sh
 ```
 4. Install required R libraries in Rstudio
 - note: some of them are available in CRAN, whilst most in Bioconductor
+
 tidyverse
 
 tximport
