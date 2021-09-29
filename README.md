@@ -25,7 +25,7 @@ This quantifies the number of reads in each sample, the abundance.tsv file for e
 
 The multiqc step (check code) will merge the fastqc files into one .html to inspect the QC of the samples
 ```
-sh kallisto_quant.sh
+sh kallisto_quant_jurkat.sh
 ```
 4. Install required R libraries in Rstudio
 - note: some of them are available in CRAN, whilst most in Bioconductor
