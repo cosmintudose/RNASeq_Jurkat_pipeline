@@ -1,5 +1,6 @@
 # RNASeq_Jurkat_pipeline
-RNA-Seq pipeline Jurkat cell-line EZH2-KO experiment: alignment, QC, DGE analysis, GSEA, GO
+RNA-Seq pipeline Jurkat cell-line EZH2-KO experiment: alignment, QC, DGE analysis, GSEA,
+First three steps can be skipped if using kallisto abundance available from GEO
 
 1. Install bash tools
 
@@ -44,21 +45,9 @@ matrixStats
 
 cowplot
 
-DT
-
-gt
-
-plotly
-
 limma
 
-RColorBrewer
-
-GSEABase 
-
-Biobase 
-
-GSVA 
+RColorBrewer  
 
 gprofiler2 
 
@@ -66,16 +55,25 @@ clusterProfiler
 
 msigdbr 
 
-enrichplotgplots
+enrichplot
 
+gplots
+
+RColorBrewer
+
+ggrepel
+
+gridExtra
+
+pheatmap
 
 5. Run Jurkat_wt_vs_a7_vs_c9.R for:
 - violin plots comparing normalized and filtered data with unnormalized and unfiltered data
 - PCA plot
 
-6. Run Jurkat_wt_vs_a7.R and Jurkat_wt_vs_c9.R *could've been merged into just one file, but I prefer them this way
-- contain DGE analysis, GSEA, GO
+6. Run Jurkat_wt_vs_clones.R, Jurkat_wt_vs_a7.R and Jurkat_wt_vs_c9.R 
+- contain DGE analysis, GSEA
 
-7. Venns_diif_expressed_genes_jurkat.R - For venns showing overlap between wt_vs_a7 AND wt_vs_c9
+7. Progeny_jurkat_wt_vs_clones
 
-Aknowledgement: pipeline derived from https://diytranscriptomics.com/
+Aknowledgement: RNA-Seq pipeline derived from https://diytranscriptomics.com/
