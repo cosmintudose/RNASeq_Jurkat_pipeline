@@ -2,7 +2,7 @@
 RNA-Seq pipeline Jurkat cell-line EZH2-KO experiment: alignment, QC, DGE analysis, GSEA,
 First three steps can be skipped if using kallisto abundance available from GEO
 
-1. Install bash tools
+1. Install tools
 
 - Kallisto 
 ```sudo apt install -y kallisto```
@@ -24,7 +24,7 @@ wget http://ftp.ensembl.org/pub/release-104/fasta/homo_sapiens/cdna/Homo_sapiens
 
 This quantifies the number of reads in each sample, the abundance.tsv file for each sample will be used in the downstream analysis
 
-The multiqc step (check code) will merge the fastqc files into one .html to inspect the QC of the samples
+The multiqc step will merge the fastqc files into one .html to inspect the QC of the samples
 ```
 sh kallisto_quant_jurkat.sh
 ```
