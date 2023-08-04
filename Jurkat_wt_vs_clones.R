@@ -1,9 +1,9 @@
-###Jurkat wt vs A7
-#This script performs differential gene expression analysis and GSEA on Jurkat EZH2-WT vs Jurkat-EZH2-KO A7
+###Jurkat wt vs clones
+#This script performs differential gene expression analysis and GSEA on Jurkat EZH2-WT vs Jurkat-EZH2-KO
 #Input: kallisto abundance for each sample - available on GEO
 #Input: study design file available with the code
 #Output: volcano plot, GSEA plots
-#Output: differentially expressed genes comparing WT with A7 EZH2-KO clone
+#Output: differentially expressed genes comparing WT with both A7 and C9 EZH2-KO clones
 #Output: files for downstream PROGENy analysis
 
 ###load packages ----
@@ -18,9 +18,9 @@ library(clusterProfiler)
 library(msigdbr) 
 library(enrichplot)
 
+
 ### read data----
-design <- read_tsv("study_design_jurkat.txt") %>%
-  dplyr::filter(group %in% c("WT", "A7"))
+design <- read_tsv("study_design_jurkat.txt") 
 path <- file.path("/home/cosmin/rna_seq_clones/raw_data/", design$sample, "abundance.tsv") # set file paths to mapped data
 
 Tx <- transcripts(EnsDb.Hsapiens.v86, columns=c("tx_id", "gene_name")) %>% #gene symbols 
@@ -29,11 +29,11 @@ Tx <- transcripts(EnsDb.Hsapiens.v86, columns=c("tx_id", "gene_name")) %>% #gene
   dplyr::select("target_id", "gene_name")
 
 Tx_gene <- tximport(path, #imports the data for all samples
-                    type = "kallisto",
-                    tx2gene = Tx,
-                    txOut = FALSE, #data represented at gene level rather than transcript
-                    countsFromAbundance = "lengthScaledTPM", #transcripts per million
-                    ignoreTxVersion = TRUE) 
+                     type = "kallisto",
+                     tx2gene = Tx,
+                     txOut = FALSE, #data represented at gene level rather than transcript
+                     countsFromAbundance = "lengthScaledTPM", #transcripts per million
+                     ignoreTxVersion = TRUE) 
 
 
 ### preprocessing----
@@ -46,7 +46,7 @@ colnames(log2.cpm.df) <- c("geneID", sample_labels)
 
 ###tidy data
 log2.cpm.df.pivot <- pivot_longer(log2.cpm.df,
-                                  cols = c(A10, A11, A12, A13, A14, A15),
+                                  cols = c(A10, A11, A12, A13, A14, A15, A16, A17, A18),
                                   names_to = "samples", # name of new column
                                   values_to = "expression") # name of new column storing all the data
 
@@ -68,17 +68,17 @@ colnames(log2.cpm.filtered.norm) <- c("geneID", sample_labels)
 
 ### multivariate analysis ----
 data.df <- mutate(log2.cpm.filtered.norm,
-                  jurkat.wt.AVG = (A11 + A12 + A13)/3,
-                  jurkat.a7.AVG = (A10 + A14 + A15)/3,
-                  LogFC = (jurkat.a7.AVG - jurkat.wt.AVG)) %>% 
+                    jurkat.wt.AVG = (A13 + A11 + A12)/3,
+                    jurkat.clones.AVG = (A10 + A14 + A15 + A16 + A17 + A18)/6,
+                    LogFC = (jurkat.clones.AVG - jurkat.wt.AVG)) %>% 
   mutate_if(is.numeric, round, 2)
 
 
-group <- design$group
+group <- design$phenotype
 group <- factor(group)
 
 
-write.csv(data.df[ ,c(1:10)], file = "normalised_expression_jurkat_wt_vs_a7.csv", row.names = FALSE)
+write.csv(data.df[ ,c(1:10)], file = "normalised_expression_jurkat_wt_vs_clones.csv", row.names = FALSE)
 
 
 ### Differential gene expression analysis ----
@@ -87,8 +87,8 @@ colnames(design) <- levels(group)
 
 v.DEGList.filtered.norm <- voom(DGEList.filtered.norm, design, plot = TRUE) #models the mean-variance trend
 fit <- lmFit(v.DEGList.filtered.norm, design) #fits linear model
-contrast.matrix <- makeContrasts(differences = A7 - WT,
-                                 levels = design) #contrast matrix
+contrast.matrix <- makeContrasts(differences = Jurkat_c - Jurkat_wt,
+                                 levels=design) #contrast matrix
 
 fits <- contrasts.fit(fit, contrast.matrix) #contrasts between the 2 groups
 ebFit <- eBayes(fits)
@@ -98,7 +98,7 @@ TopHits.df <- TopHits %>%
   as_tibble(rownames = "geneID")
 
 ####input for PROGENy
-write.csv(TopHits.df, file = "Jurkat_wt_v_a7_all_genes.csv", quote = FALSE, row.names = FALSE)
+write.csv(TopHits.df, file = "Jurkat_wt_v_clones_all_genes.csv", quote = FALSE, row.names = FALSE)
 
 
 ###diff genes - volcano plot ----
@@ -108,11 +108,11 @@ summary(results) #results are added manually to vplot upstream
 vplot <- ggplot(TopHits.df) +
   aes(y = -log10(adj.P.Val), x = logFC, text = paste("Symbol:", geneID)) +
   geom_point(size=2) +
-  annotate("rect", xmin = 1, xmax = 12, ymin = -log10(0.05), ymax = 3, alpha=.2, fill="#BE684D") +
-  annotate("rect", xmin = -1, xmax = -12, ymin = -log10(0.05), ymax = 3, alpha=.2, fill="#2C467A") +
-  annotate(geom = "text", x = -11, y = 1.4, label = "406", size = 7, colour = "#2C467A") + #labels are manually added after running summary(results)
-  annotate(geom = "text", x = 11, y = 1.4, label = "462", size = 7, colour = "#BE684D") +
-  labs(title="Jurkat wt & A7",
+  annotate("rect", xmin = 1, xmax = 11, ymin = -log10(0.05), ymax = 2.1, alpha=.2, fill="#BE684D") +
+  annotate("rect", xmin = -1, xmax = -11, ymin = -log10(0.05), ymax = 2.1, alpha=.2, fill="#2C467A") +
+  annotate(geom = "text", x = -10, y = 1.4, label = "10", size = 7, colour = "#2C467A") + #labels are manually added after running summary(results)
+  annotate(geom = "text", x = 10, y = 1.4, label = "12", size = 7, colour = "#BE684D") +
+  labs(title="Jurkat wt & clones",
        subtitle = "Volcano plot") +
   theme_bw(base_size = 15)
 vplot
@@ -123,7 +123,7 @@ diffGenes <- v.DEGList.filtered.norm$E[results[,1] !=0,]
 diffGenes.df <- as_tibble(diffGenes, rownames = "geneID")
 
 #saving differentially expressed genes
-write.csv(diffGenes.df, file = "DEGs_jurkat_wt_v_a7_per_sample_1logfc.csv", quote = FALSE, row.names = FALSE)
+write.csv(diffGenes.df, file = "DEGs_jurkat_wt_v_clones_per_sample_1logfc.csv", quote = FALSE, row.names = FALSE)
 
 # GSEA ----
 hs_gsea_c2 <- msigdbr(species = "Homo sapiens", # 
@@ -142,7 +142,7 @@ set.seed(1234)
 GSEA.res <- GSEA(data.gsea, TERM2GENE=hs_gsea_c2, verbose=FALSE, seed = TRUE, nPermSimple = 10000, eps = 0)
 GSEA.df <- as_tibble(GSEA.res@result)
 
-write.csv(GSEA.df, file = "wt_vs_a7_GSEA_C2_jurkat_enriched.csv") #change name depending on which collection is run
+write.csv(GSEA.df, file = "wt_vs_clones_GSEA_C2_jurkat_enriched.csv") #change name depending on which collection is run
 
 #plot for individual signature
 gseaplot2(GSEA.res, 
@@ -155,7 +155,7 @@ GSEA.df[1:30, ] %>% #to plot entire df, simly remove the square brackets; curren
   ggplot(aes(x=NES, y= fct_reorder(ID, NES), fill = NES)) +
   geom_bar(stat = "identity") +
   scale_fill_gradient2(low = "blue", high = "red") +
-  labs(y = "ID", title = "C2 - WT vs A7") + #title to be changed depending on which collection is run
+  labs(y = "ID", title = "C2 - WT vs clones") + #title to be changed depending on which collection is run
   theme_minimal() + 
   theme(axis.title = element_text(size = 24), 
         axis.text.x = element_text(size = 24),

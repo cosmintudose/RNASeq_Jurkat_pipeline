@@ -1,4 +1,11 @@
-###Jurkat wt vs c9
+###Jurkat wt vs C9
+#This script performs differential gene expression analysis and GSEA on Jurkat EZH2-WT vs Jurkat-EZH2-KO C9
+#Input: kallisto abundance for each sample - available on GEO
+#Input: study design file available with the code
+#Output: volcano plot, GSEA plots
+#Output: differentially expressed genes comparing WT with C9 EZH2-KO clone
+#Output: files for downstream PROGENy analysis
+
 ###load packages ----
 library(tidyverse)
 library(tximport)
@@ -6,326 +13,153 @@ library(ensembldb)
 library(EnsDb.Hsapiens.v86)
 library(edgeR)
 library(matrixStats)
-library(cowplot)
-library(DT)
-library(gt)
-library(plotly)
 library(limma)
-library(RColorBrewer)
-library(GSEABase) 
-library(Biobase) 
-library(GSVA) 
-library(gprofiler2) 
 library(clusterProfiler) 
 library(msigdbr) 
-library(gplots)
 library(enrichplot)
-### read data----
-targets.jurkat <- read_tsv("study_design_jurkat_3.txt") 
-path <- file.path(targets.jurkat$sample, "abundance.tsv") # set file paths to mapped data
 
-Tx.jurkat <- transcripts(EnsDb.Hsapiens.v86, columns=c("tx_id", "gene_name")) # annotations and gene symbols 
-Tx.jurkat <- as_tibble(Tx.jurkat)
-Tx.jurkat <- dplyr::rename(Tx.jurkat, target_id = tx_id)
-Tx.jurkat <- dplyr::select(Tx.jurkat, "target_id", "gene_name")
-Txi_gene.jurkat <- tximport(path, #imports the data for all samples
-                            type = "kallisto", 
-                            tx2gene = Tx.jurkat, 
-                            txOut = FALSE, # determines whether data represented at transcript or gene level (here read at gene level)
-                            countsFromAbundance = "lengthScaledTPM", #transcripts per million
-                            ignoreTxVersion = TRUE)
+### read data----
+design <- read_tsv("study_design_jurkat.txt") %>%
+  dplyr::filter(group %in% c("WT", "C9"))
+path <- file.path("/home/cosmin/rna_seq_clones/raw_data/", design$sample, "abundance.tsv") # set file paths to mapped data
+
+Tx <- transcripts(EnsDb.Hsapiens.v86, columns=c("tx_id", "gene_name")) %>% #gene symbols 
+  as_tibble() %>%
+  dplyr::rename(target_id = tx_id) %>%
+  dplyr::select("target_id", "gene_name")
+
+Tx_gene <- tximport(path, #imports the data for all samples
+                    type = "kallisto",
+                    tx2gene = Tx,
+                    txOut = FALSE, #data represented at gene level rather than transcript
+                    countsFromAbundance = "lengthScaledTPM", #transcripts per million
+                    ignoreTxVersion = TRUE) 
 
 
 ### preprocessing----
+sample_labels <- design$sample
+DGEList <- DGEList(Tx_gene$counts)
+log2.cpm <- cpm(DGEList, log=TRUE)  ###log2 normalised counts per million
 
-sampleLabels.jurkat <- targets.jurkat$sample
-myDGEList.jurkat <- DGEList(Txi_gene.jurkat$counts)
-log2.cpm.jurkat <- cpm(myDGEList.jurkat, log=TRUE)  ###log2 normalised counts per million
-
-log2.cpm.jurkat.df <- as_tibble(log2.cpm.jurkat, rownames = "geneID") ###convert as data frame
-colnames(log2.cpm.jurkat.df) <- c("geneID", sampleLabels.jurkat)
+log2.cpm.df <- as_tibble(log2.cpm, rownames = "geneID") ###convert as data frame
+colnames(log2.cpm.df) <- c("geneID", sample_labels)
 
 ###tidy data
-log2.cpm.jurkat.df.pivot <- pivot_longer(log2.cpm.jurkat.df, 
-                                         cols = c(A11, A12, A13, A16, A17, A18),
-                                         names_to = "samples", # name of new column
-                                         values_to = "expression") # name of new column storing all the data
+log2.cpm.df.pivot <- pivot_longer(log2.cpm.df,
+                                  cols = c(A11, A12, A13, A16, A17, A18),
+                                  names_to = "samples", # name of new column
+                                  values_to = "expression") # name of new column storing all the data
 
-###plot tidy data of log2 expression - violin plots
-
-p1 <- ggplot(log2.cpm.jurkat.df.pivot) +
-  aes(x=samples, y=expression, fill=samples) +
-  geom_violin(trim = FALSE, show.legend = FALSE) +
-  stat_summary(fun = "median", 
-               geom = "point", 
-               shape = 95, 
-               size = 10, 
-               colour = "black", 
-               show.legend = FALSE) +
-  labs(y="log2 expression", x = "sample",
-       title="Log2 Counts per Million (CPM)",
-       subtitle="unfiltered, non-normalized",
-       caption=paste0("produced on ", Sys.time())) +
-  theme_bw()
 
 
 ###filter data
-cpm.jurkat <- cpm(myDGEList.jurkat)
-keepers.jurkat <- rowSums(cpm.jurkat>1)>=3 #user defined - depends on studydesign, eliminates lowly expressed genes
-myDGEList.jurkat.filtered <- myDGEList.jurkat[keepers.jurkat,]
+cpm <- cpm(DGEList)
+keepers <- rowSums(cpm>1)>=3 #user defined - depends on studydesign, eliminates lowly expressed genes
+DGEList.filtered <- DGEList[keepers,]
 
-log2.cpm.jurkat.filtered <- cpm(myDGEList.jurkat.filtered, log=TRUE)
-log2.cpm.jurkat.filtered.df <- as_tibble(log2.cpm.jurkat.filtered, rownames = "geneID")
-colnames(log2.cpm.jurkat.filtered.df) <- c("geneID", sampleLabels.jurkat)
-log2.cpm.jurkat.filtered.df.pivot <- pivot_longer(log2.cpm.jurkat.filtered.df,
-                                                  cols = c(A11, A12, A13, A16, A17, A18), 
-                                                  names_to = "samples", # name of new column
-                                                  values_to = "expression") # name of new column storing all the data
+###normalize data
+DGEList.filtered.norm <- calcNormFactors(DGEList.filtered, method = "TMM") #TMM normalization
+log2.cpm.filtered.norm <- DGEList.filtered.norm %>% 
+  cpm(log=TRUE) %>% 
+  as_tibble(rownames = "geneID")
 
-p2 <- ggplot(log2.cpm.jurkat.filtered.df.pivot) +
-  aes(x=samples, y=expression, fill=samples) +
-  geom_violin(trim = FALSE, show.legend = FALSE) +
-  stat_summary(fun = "median", 
-               geom = "point", 
-               shape = 95, 
-               size = 10, 
-               color = "black", 
-               show.legend = FALSE) +
-  labs(y="log2 expression", x = "sample",
-       title="Log2 Counts per Million (CPM)",
-       subtitle="filtered, non-normalized",
-       caption=paste0("produced on ", Sys.time())) +
-  theme_bw()
-
-myDGEList.jurkat.filtered.norm <- calcNormFactors(myDGEList.jurkat.filtered, method = "TMM")
-log2.cpm.jurkat.filtered.norm <- cpm(myDGEList.jurkat.filtered.norm, log=TRUE)
-log2.cpm.jurkat.filtered.norm.df <- as_tibble(log2.cpm.jurkat.filtered.norm, rownames = "geneID")
-colnames(log2.cpm.jurkat.filtered.norm.df) <- c("geneID", sampleLabels.jurkat)
-log2.cpm.jurkat.filtered.norm.df.pivot <- pivot_longer(log2.cpm.jurkat.filtered.norm.df,
-                                                       cols = c(A11, A12, A13, A16, A17, A18),
-                                                       names_to = "samples", # name of new column
-                                                       values_to = "expression") # name of new column storing all the data
-
-
-p3 <- ggplot(log2.cpm.jurkat.filtered.norm.df.pivot) +
-  aes(x=samples, y=expression, fill=samples) +
-  geom_violin(trim = FALSE, show.legend = FALSE) +
-  stat_summary(fun = "median", 
-               geom = "point", 
-               shape = 95, 
-               size = 10, 
-               color = "black", 
-               show.legend = FALSE) +
-  labs(y="log2 expression", x = "sample",
-       title="Log2 Counts per Million (CPM)",
-       subtitle="filtered, TMM normalized",
-       caption=paste0("produced on ", Sys.time())) +
-  theme_bw()
-
-plot_grid(p1, p2, p3, labels = c('A', 'B', 'C'), label_size = 12)
+colnames(log2.cpm.filtered.norm) <- c("geneID", sample_labels)
 
 
 ### multivariate analysis ----
-
-mydata.jurkat.df <- mutate(log2.cpm.jurkat.filtered.norm.df,
-                           jurkat.wt.AVG = (A13 + A11 + A12)/3, 
-                           jurkat.c9.AVG = (A16 + A17 + A18)/3,
-                           #now make columns comparing each of the averages above 
-                           LogFC = (jurkat.c9.AVG - jurkat.wt.AVG)) %>% 
+data.df <- mutate(log2.cpm.filtered.norm,
+                  jurkat.wt.AVG = (A11 + A12 + A13)/3,
+                  jurkat.c9.AVG = (A16 + A17 + A18)/3,
+                  LogFC = (jurkat.c9.AVG - jurkat.wt.AVG)) %>% 
   mutate_if(is.numeric, round, 2)
 
-datatable(mydata.jurkat.df[,c(1,8:10)], 
-          extensions = c('KeyTable', "FixedHeader"), 
-          filter = 'top',
-          options = list(keys = TRUE, 
-                         searchHighlight = TRUE, 
-                         pageLength = 10, 
-                         lengthMenu = c("10", "25", "50", "100")))
+
+group <- design$group
+group <- factor(group)
 
 
-groupjurkat <- targets.jurkat$phenotype
-groupjurkat <- factor(groupjurkat)
+write.csv(data.df[ ,c(1:10)], file = "normalised_expression_jurkat_wt_vs_c9.csv", row.names = FALSE)
 
 
-### pca jurkat ----
+### Differential gene expression analysis ----
+design <- model.matrix(~0 + group)
+colnames(design) <- levels(group)
 
-pca.res.jurkat <- prcomp(t(log2.cpm.jurkat.filtered.norm), scale.=F, retx=T)
-pc.var.jurkat <- pca.res.jurkat$sdev^2 # sdev^2 captures these eigenvalues from the PCA result
-pc.per.jurkat <- round(pc.var.jurkat/sum(pc.var.jurkat)*100, 1) 
-pca.res.jurkat.df <- as_tibble(pca.res.jurkat$x)
-pca.plot.jurkat <- ggplot(pca.res.jurkat.df) +
-  aes(x=PC1, y=PC2, label=sampleLabels.jurkat, color = groupjurkat) +
-  geom_point(size=4) +
-  #stat_ellipse() +
-  xlab(paste0("PC1 (",pc.per.jurkat[1],"%",")")) + 
-  ylab(paste0("PC2 (",pc.per.jurkat[2],"%",")")) +
-  labs(title="PCA plot",
-       caption=paste0("produced on ", Sys.time())) +
-  coord_fixed() +
-  theme_bw()
+v.DEGList.filtered.norm <- voom(DGEList.filtered.norm, design, plot = TRUE) #models the mean-variance trend
+fit <- lmFit(v.DEGList.filtered.norm, design) #fits linear model
+contrast.matrix <- makeContrasts(differences = C9 - WT,
+                                 levels = design) #contrast matrix
 
-ggplotly(pca.plot.jurkat) #interactive version - can hover and see each gene
+fits <- contrasts.fit(fit, contrast.matrix) #contrasts between the 2 groups
+ebFit <- eBayes(fits)
+TopHits <- topTable(ebFit, adjust ="BH", coef=1, number=20000, sort.by="logFC")
+
+TopHits.df <- TopHits %>%
+  as_tibble(rownames = "geneID")
+
+####input for PROGENy
+write.csv(TopHits.df, file = "Jurkat_wt_v_c9_all_genes.csv", quote = FALSE, row.names = FALSE)
 
 
 ###diff genes - volcano plot ----
+results <- decideTests(ebFit, method = "global", adjust.method = "BH", p.value = 0.05, lfc = 1)
+summary(results) #results are added manually to vplot upstream
 
-designjurkat <- model.matrix(~0 + groupjurkat)
-colnames(designjurkat) <- levels(groupjurkat)
-
-v.DEGList.jurkat.filtered.norm <- voom(myDGEList.jurkat.filtered.norm, designjurkat, plot = TRUE) #models the mean-variance trend
-fit.jurkat <- lmFit(v.DEGList.jurkat.filtered.norm, designjurkat) #fits linear model
-contrast.matrix.jurkat <- makeContrasts(differences = Jurkat_c9 - Jurkat_wt,
-                                        levels=designjurkat)
-
-fits.jurkat <- contrasts.fit(fit.jurkat, contrast.matrix.jurkat) #contrasts between the 2 groups
-ebFit.jurkat <- eBayes(fits.jurkat)
-myTopHits.jurkat <- topTable(ebFit.jurkat, adjust ="BH", coef=1, number=20000, sort.by="logFC")
-
-myTopHits.jurkat.df <- myTopHits.jurkat %>%
-  as_tibble(rownames = "geneID")
-gt(myTopHits.jurkat.df)
-
-datatable(myTopHits.jurkat.df, 
-          extensions = c('KeyTable', "FixedHeader"), 
-          caption = 'Table 1: DEGs in Jurkat_wt vs C9',
-          options = list(keys = TRUE, searchHighlight = TRUE, pageLength = 25, lengthMenu = c("10", "25", "50", "100")))
-
-write.csv(myTopHits.jurkat.df, file = "Jurkat_wt_v_c9_all_genes.csv", quote = FALSE, row.names = FALSE)
-
-signif.genes <- myTopHits.jurkat.df %>%
-  filter(adj.P.Val < 0.05 & (logFC <= -1.5 | logFC >= 1.5))
-
-write.csv(signif.genes, file = "signif_DEGs_jurkat_wt_v_c9_1dot5logfc.csv", quote = FALSE, row.names = FALSE)
-
-c9_signif_genes <- signif.genes #variable will be used in venns_diff_expressed_genes.R script
-c9_signif_genes$up_down <- c(NA)
-c9_signif_genes$up_down[c9_signif_genes[, "logFC"] < 0] <- "down"
-c9_signif_genes$up_down[c9_signif_genes[, "logFC"] >= 0] <- "up"
-
-#volcano plot
-vplot <- ggplot(myTopHits.jurkat.df) +
-  aes(y=-log10(adj.P.Val), x=logFC, text = paste("Symbol:", geneID)) +
+vplot <- ggplot(TopHits.df) +
+  aes(y = -log10(adj.P.Val), x = logFC, text = paste("Symbol:", geneID)) +
   geom_point(size=2) +
-  #geom_hline(yintercept = -log10(0.01), linetype="longdash", colour="grey", size=1) +
-  #geom_vline(xintercept = 1, linetype="longdash", colour="#BE684D", size=1) +
-  #geom_vline(xintercept = -1, linetype="longdash", colour="#2C467A", size=1) +
-  annotate("rect", xmin = 1.5, xmax = 12, ymin = -log10(0.05), ymax = 3, alpha=.2, fill="#BE684D") +
-  annotate("rect", xmin = -1.5, xmax = -12, ymin = -log10(0.05), ymax = 3, alpha=.2, fill="#2C467A") +
-  annotate(geom = "text", x = -11, y = 1.1, label = "271", size = 7, colour = "#2C467A") + #labels are manually added after running summary(results.jurkat downstream)
-  annotate(geom = "text", x = 11, y = 1.1, label = "667", size = 7, colour = "#BE684D") +
+  annotate("rect", xmin = 1, xmax = 12, ymin = -log10(0.05), ymax = 3, alpha=.2, fill="#BE684D") +
+  annotate("rect", xmin = -1, xmax = -12, ymin = -log10(0.05), ymax = 3, alpha=.2, fill="#2C467A") +
+  annotate(geom = "text", x = -11, y = 1.4, label = "553", size = 7, colour = "#2C467A") + #labels are manually added after running summary(results)
+  annotate(geom = "text", x = 11, y = 1.4, label = "737", size = 7, colour = "#BE684D") +
   labs(title="Jurkat wt & C9",
-       subtitle = "Volcano plot",
-       caption=paste0("produced on ", Sys.time())) +
+       subtitle = "Volcano plot") +
   theme_bw(base_size = 15)
 vplot
-ggplotly(vplot)
 
 
-results.jurkat <- decideTests(ebFit.jurkat, method="global", adjust.method="BH", p.value=0.05, lfc=1.5)
-summary(results.jurkat) #results are added manually to vplot upstream
+colnames(v.DEGList.filtered.norm$E) <- sample_labels
+diffGenes <- v.DEGList.filtered.norm$E[results[,1] !=0,]
+diffGenes.df <- as_tibble(diffGenes, rownames = "geneID")
 
-colnames(v.DEGList.jurkat.filtered.norm$E) <- sampleLabels.jurkat
-diffGenes.jurkat <- v.DEGList.jurkat.filtered.norm$E[results.jurkat[,1] !=0,]
-diffGenes.jurkat.df <- as_tibble(diffGenes.jurkat, rownames = "geneID")
-datatable(diffGenes.jurkat.df, 
-          extensions = c('KeyTable', "FixedHeader"), 
-          caption = 'Table 1: DEGs in Jurkat wt vs c9',
-          options = list(keys = TRUE, searchHighlight = TRUE, pageLength = 10, lengthMenu = c("10", "25", "50", "100"))) %>%
-  formatRound(columns=c(2:7), digits=2)
-
-write.csv(diffGenes.jurkat.df, file = "DEGs_jurkat_wt_v_c9_per_sample_1dot5logfc_pvalue005.csv", quote = FALSE, row.names = FALSE)
-
-
-# heatmap of up and downregulated genes----
-
-myheatcolours <- rev(brewer.pal(name="PiYG", n=10))
-clustRows.jurkat <- hclust(as.dist(1-cor(t(diffGenes.jurkat), method="pearson")), method="complete") #cluster rows by pearson correlation
-clustColumns.jurkat <- hclust(as.dist(1-cor(diffGenes.jurkat, method="spearman")), method="complete")
-module.assign.jurkat <- cutree(clustRows.jurkat, k=2)
-module.colour.jurkat <- rainbow(length(unique(module.assign.jurkat)), start=0.1, end=0.9) 
-module.colour.jurkat <- module.colour.jurkat[as.vector(module.assign.jurkat)] 
-heatmap.2(diffGenes.jurkat, 
-          Rowv=as.dendrogram(clustRows.jurkat), 
-          Colv=as.dendrogram(clustColumns.jurkat),
-          RowSideColors=module.colour.jurkat,
-          col=myheatcolours, scale='row', labRow=NA,
-          density.info="none", trace="none",  
-          cexRow=1, cexCol=1, margins=c(8,20),
-          main = "jurkat wt vs C9")
-
-
-# upregulated genes ----
-modulePick.jurkat <- 1 
-myModule_up.jurkat <- diffGenes.jurkat[names(module.assign.jurkat[module.assign.jurkat %in% modulePick.jurkat]),] 
-hrsub_up.jurkat <- hclust(as.dist(1-cor(t(myModule_up.jurkat), method="pearson")), method="complete") 
-
-heatmap.2(myModule_up.jurkat, 
-          Rowv=as.dendrogram(hrsub_up.jurkat), 
-          Colv = NA, 
-          labRow = NA,
-          col=myheatcolours, scale="row", 
-          density.info="none", trace="none", 
-          RowSideColors=module.colour.jurkat[module.assign.jurkat %in% modulePick.jurkat], margins=c(8,20))
-
-# downregulated genes ----
-modulePick.jurkat <- 2 
-myModule_down.jurkat <- diffGenes.jurkat[names(module.assign.jurkat[module.assign.jurkat %in% modulePick.jurkat]),] 
-hrsub_down.jurkat <- hclust(as.dist(1-cor(t(myModule_down.jurkat), method="pearson")), method="complete") 
-
-heatmap.2(myModule_down.jurkat, 
-          Rowv=as.dendrogram(hrsub_down.jurkat), 
-          Colv = NA, 
-          labRow = NA,
-          col=myheatcolours, scale="row", 
-          density.info="none", trace="none", 
-          RowSideColors=module.colour.jurkat[module.assign.jurkat %in% modulePick.jurkat], margins=c(8,20))
-
-# gostplot ----
-
-gost.res_up.jurkat <- gost(rownames(myModule_up.jurkat), organism = "hsapiens", correction_method = "fdr")
-gostplot(gost.res_up.jurkat, interactive = T, capped = F) #,title = "GO term analysis in genes upregulated in jurkat_clones")
-
-gost.res_down.jurkat <- gost(rownames(myModule_down.jurkat), organism = "hsapiens", correction_method = "fdr")
-gostplot(gost.res_down.jurkat, interactive = T, capped = F) #, title = "GO term analysis in genes upregulated in jurkat_wt")
+#saving differentially expressed genes
+write.csv(diffGenes.df, file = "DEGs_jurkat_wt_v_c9_per_sample_1logfc.csv", quote = FALSE, row.names = FALSE)
 
 # GSEA ----
-hs_gsea_c2 <- msigdbr(species = "Homo sapiens", # change depending on species your data came from
-                      category = "C2") %>% # choose your msigdb collection of interest
+hs_gsea_c2 <- msigdbr(species = "Homo sapiens", # 
+                      category = "C2") %>% # choose msigdb collection of interest: C2, C6 and H are used in Lefeivre et al
   dplyr::select(gs_name, gene_symbol) #just get the columns corresponding to signature name and gene symbols of genes in each signature 
 
 
-# the columns corresponding to gene symbols and LogFC for at least one pairwise comparison for the enrichment analysis
-mydata.jurkat.df.sub <- dplyr::select(mydata.jurkat.df, geneID, LogFC)
-mydata.jurkat.gsea <- mydata.jurkat.df.sub$LogFC
-names(mydata.jurkat.gsea) <- as.character(mydata.jurkat.df.sub$geneID)
-mydata.jurkat.gsea <- sort(mydata.jurkat.gsea, decreasing = TRUE)
+#the columns corresponding to gene symbols and LogFC for at least one pairwise comparison for the enrichment analysis
+data.df.sub <- dplyr::select(data.df, geneID, LogFC)
+data.gsea <- data.df.sub$LogFC
+names(data.gsea) <- as.character(data.df.sub$geneID)
+data.gsea <- sort(data.gsea, decreasing = TRUE)
 
-# GSEA function from clusterProfiler
+#run GSEA
 set.seed(1234)
-myGSEA.jurkat.res <- GSEA(mydata.jurkat.gsea, TERM2GENE=hs_gsea_c2, verbose=FALSE, seed = TRUE, nPermSimple = 10000, eps = 0)
-myGSEA.jurkat.df <- as_tibble(myGSEA.jurkat.res@result)
+GSEA.res <- GSEA(data.gsea, TERM2GENE=hs_gsea_c2, verbose=FALSE, seed = TRUE, nPermSimple = 10000, eps = 0)
+GSEA.df <- as_tibble(GSEA.res@result)
 
-# interactive table
-datatable(myGSEA.jurkat.df[,1:11],  ##add column 11 for gene list
-          extensions = c('KeyTable', "FixedHeader"), 
-          caption = 'Signatures enriched in clones',
-          options = list(keys = TRUE, searchHighlight = TRUE, pageLength = 10, lengthMenu = c("10", "25", "50", "100"))) %>%
-  formatRound(columns=c(3:8), digits=4) #
+write.csv(GSEA.df, file = "wt_vs_c9_GSEA_C2_jurkat_enriched.csv") #change name depending on which collection is run
 
-
-gseaplot2(myGSEA.jurkat.res, 
-          geneSetID = 1, #can choose multiple signatures to overlay in this plot
+#plot for individual signature
+gseaplot2(GSEA.res, 
+          geneSetID = 1, #change number based on the number of the wanted signature in GSEA.df
           pvalue_table = FALSE, 
-          title = myGSEA.jurkat.res$Description[1]) #can turn off
+          title = GSEA.res$Description[1])
 
-
-myGSEA.jurkat.df <- myGSEA.jurkat.df %>%
-  mutate(phenotype = dplyr::case_when(
-    NES > 0 ~ "jurkat_C9",
-    NES < 0 ~ "jurkat_wt"))
-
-# bubble plot
-ggplot(myGSEA.jurkat.df[1:30, ], aes(x=phenotype, y=ID)) + 
-  geom_point(aes(size=setSize, color = NES, alpha=-log10(p.adjust))) +
-  scale_color_gradient(low="blue", high="red") +
-  theme_bw()
+#plots significant GSEA
+GSEA.df[1:30, ] %>% #to plot entire df, simly remove the square brackets; currently it's plotting the top 30 enriched sets
+  ggplot(aes(x=NES, y= fct_reorder(ID, NES), fill = NES)) +
+  geom_bar(stat = "identity") +
+  scale_fill_gradient2(low = "blue", high = "red") +
+  labs(y = "ID", title = "C2 - WT vs C9") + #title to be changed depending on which collection is run
+  theme_minimal() + 
+  theme(axis.title = element_text(size = 24), 
+        axis.text.x = element_text(size = 24),
+        legend.text = element_text(size = 12), 
+        legend.title = element_text(size = 14), 
+        title = element_text(size = 16), 
+        panel.grid.minor.x = element_blank()) 

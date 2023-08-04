@@ -1,3 +1,12 @@
+#This script only produces the PCA plot and performs checks on data normalisation (TMM and log2 TPM)
+
+###Jurkat wt vs A7 & C9 (separately)
+#This script performs differential gene expression analysis and GSEA on Jurkat EZH2-WT vs Jurkat-EZH2-KO
+#Input: kallisto abundance for each sample - available on GEO
+#Input: study design file available with the code
+#Output: This script only produces the PCA plot and performs checks on data normalisation (TMM and log2 TPM)
+#Output: files for downstream PROGENy analysis
+
 ###Jurkat wt vs a7 vs c9 
 library(tidyverse)
 library(tximport)
@@ -6,167 +15,132 @@ library(EnsDb.Hsapiens.v86)
 library(edgeR)
 library(matrixStats)
 library(cowplot)
-library(DT)
-library(gt)
-library(plotly)
-library(limma)
 library(colorspace)
 
+#function needed later
+violin_plot_transcriptomics <- function(df, label) {
+  plot <- ggplot(log2.cpm.df.pivot) +
+    aes(x = samples, y = expression) +
+    geom_violin(trim = FALSE, show.legend = FALSE, fill = "lightblue") +
+    stat_summary(fun = "median", 
+                 geom = "point", 
+                 shape = 95, 
+                 size = 10, 
+                 colour = "black", 
+                 show.legend = FALSE) +
+    labs(y = "log2 expression", x = "sample",
+         title = "Log2 Counts per Million (CPM)",
+         subtitle = label) +
+    theme_bw()
+  return(plot)
+}
+
+
 ### read data----
-targets.jurkat <- read_tsv("study_design_jurkat.txt")
-path <- file.path(targets.jurkat$sample, "abundance.tsv") # set file paths to mapped data
+targets <- read_tsv("study_design_jurkat.txt") 
+path <- file.path("/home/cosmin/rna_seq_clones/raw_data/", targets$sample, "abundance.tsv") #set file paths to mapped data
 
-Tx.jurkat <- transcripts(EnsDb.Hsapiens.v86, columns=c("tx_id", "gene_name")) # annotations and gene symbols 
-Tx.jurkat <- as_tibble(Tx.jurkat)
-Tx.jurkat <- dplyr::rename(Tx.jurkat, target_id = tx_id)
-Tx.jurkat <- dplyr::select(Tx.jurkat, "target_id", "gene_name")
-Txi_gene.jurkat <- tximport(path, 
-                            type = "kallisto", 
-                            tx2gene = Tx.jurkat, 
-                            txOut = FALSE, # determines whether data represented at transcript or gene level (here read at gene level)
-                            countsFromAbundance = "lengthScaledTPM",
-                            ignoreTxVersion = TRUE)
+Tx <- transcripts(EnsDb.Hsapiens.v86, columns=c("tx_id", "gene_name")) %>% #gene symbols
+  as_tibble() %>%
+  dplyr::rename(target_id = tx_id) %>%
+  dplyr::select("target_id", "gene_name")
 
+Txi_gene <- tximport(path, #imports the data for all samples
+                     type = "kallisto",
+                     tx2gene = Tx,
+                     txOut = FALSE, #data represented at gene level rather than transcript
+                     countsFromAbundance = "lengthScaledTPM", #transcripts per million
+                     ignoreTxVersion = TRUE) 
 
 ### preprocessing----
 
-sampleLabels.jurkat <- targets.jurkat$sample
-myDGEList.jurkat <- DGEList(Txi_gene.jurkat$counts)
-log2.cpm.jurkat <- cpm(myDGEList.jurkat, log=TRUE)  ###log2 normalised counts per million
+sampleLabels <- targets$sample
+DGEList <- DGEList(Txi_gene$counts)
+log2.cpm <- cpm(DGEList, log=TRUE)  ###log2 normalised counts per million
 
-log2.cpm.jurkat.df <- as_tibble(log2.cpm.jurkat, rownames = "geneID") ###convert as data frame
-colnames(log2.cpm.jurkat.df) <- c("geneID", sampleLabels.jurkat)
+log2.cpm.df <- as_tibble(log2.cpm, rownames = "geneID") ###convert as data frame
+colnames(log2.cpm.df) <- c("geneID", sampleLabels)
 
 ###tidy data
-log2.cpm.jurkat.df.pivot <- pivot_longer(log2.cpm.jurkat.df, 
-                                         cols = c(A10, A11, A12, A13, A14, A15, A16, A17, A18),
-                                         names_to = "samples", # name of new column
-                                         values_to = "expression") # name of new column storing all the data
+log2.cpm.df.pivot <- pivot_longer(log2.cpm.df,
+                                  cols = c(A10, A11, A12, A13, A14, A15, A16, A17, A18),
+                                  names_to = "samples", # name of new column
+                                  values_to = "expression") # name of new column storing all the data
 
-###plot tidy data of log2 expression
 
-p1 <- ggplot(log2.cpm.jurkat.df.pivot) +
-  aes(x=samples, y=expression, fill=samples) +
-  geom_violin(trim = FALSE, show.legend = FALSE) +
-  stat_summary(fun = "median", 
-               geom = "point", 
-               shape = 95, 
-               size = 10, 
-               colour = "black", 
-               show.legend = FALSE) +
-  labs(y="log2 expression", x = "sample",
-       title="Log2 Counts per Million (CPM)",
-       subtitle="unfiltered, non-normalized",
-       caption=paste0("produced on ", Sys.time())) +
-  theme_bw()
+###plot log2 expression (unnormalized and unfiltered)
+p1 <- violin_plot_transcriptomics(log2.cpm.df.pivot, "unfiltered, non-normalized")
 
 
 ###filter data
-cpm.jurkat <- cpm(myDGEList.jurkat)
-keepers.jurkat <- rowSums(cpm.jurkat>1)>=3 #user defined - depends on studydesign, eliminates lowly expressed genes
-myDGEList.jurkat.filtered <- myDGEList.jurkat[keepers.jurkat,]
+cpm <- cpm(DGEList)
+keepers <- rowSums(cpm>1)>=3 #user defined - depends on studydesign 
+DGEList.filtered <- DGEList[keepers,] #eliminates lowly expressed genes
 
-log2.cpm.jurkat.filtered <- cpm(myDGEList.jurkat.filtered, log=TRUE)
-log2.cpm.jurkat.filtered.df <- as_tibble(log2.cpm.jurkat.filtered, rownames = "geneID")
-colnames(log2.cpm.jurkat.filtered.df) <- c("geneID", sampleLabels.jurkat)
-log2.cpm.jurkat.filtered.df.pivot <- pivot_longer(log2.cpm.jurkat.filtered.df,
-                                                  cols = c(A10, A11, A12, A13, A14, A15, A16, A17, A18), 
-                                                  names_to = "samples", # name of new column
-                                                  values_to = "expression") # name of new column storing all the data
+log2.cpm.filtered <- cpm(DGEList.filtered, log=TRUE) 
+log2.cpm.filtered.df <- as_tibble(log2.cpm.filtered, rownames = "geneID")
+colnames(log2.cpm.filtered.df) <- c("geneID", sampleLabels)
+log2.cpm.filtered.df.pivot <- pivot_longer(log2.cpm.filtered.df,
+                                           cols = c(A10, A11, A12, A13, A14, A15, A16, A17, A18),
+                                           names_to = "samples", # name of new column
+                                           values_to = "expression") # name of new column storing all the data
 
-p2 <- ggplot(log2.cpm.jurkat.filtered.df.pivot) +
-  aes(x=samples, y=expression, fill=samples) +
-  geom_violin(trim = FALSE, show.legend = FALSE) +
-  stat_summary(fun = "median", 
-               geom = "point", 
-               shape = 95, 
-               size = 10, 
-               color = "black", 
-               show.legend = FALSE) +
-  labs(y="log2 expression", x = "sample",
-       title="Log2 Counts per Million (CPM)",
-       subtitle="filtered, non-normalized",
-       caption=paste0("produced on ", Sys.time())) +
-  theme_bw()
+###plot log2 expression (filtered and unnormalized)
+p2 <- violin_plot_transcriptomics(log2.cpm.filtered.df.pivot, "filtered, non-normalized")
 
-myDGEList.jurkat.filtered.norm <- calcNormFactors(myDGEList.jurkat.filtered, method = "TMM")
-log2.cpm.jurkat.filtered.norm <- cpm(myDGEList.jurkat.filtered.norm, log=TRUE)
-log2.cpm.jurkat.filtered.norm.df <- as_tibble(log2.cpm.jurkat.filtered.norm, rownames = "geneID")
-colnames(log2.cpm.jurkat.filtered.norm.df) <- c("geneID", sampleLabels.jurkat)
-log2.cpm.jurkat.filtered.norm.df.pivot <- pivot_longer(log2.cpm.jurkat.filtered.norm.df,
+###normalize data 
+DGEList.filtered.norm <- calcNormFactors(DGEList.filtered, method = "TMM")
+log2.cpm.filtered.norm <- cpm(DGEList.filtered.norm, log=TRUE)
+log2.cpm.filtered.norm.df <- as_tibble(log2.cpm.filtered.norm, rownames = "geneID")
+colnames(log2.cpm.filtered.norm.df) <- c("geneID", sampleLabels)
+log2.cpm.filtered.norm.df.pivot <- pivot_longer(log2.cpm.filtered.norm.df,
                                                        cols = c(A10, A11, A12, A13, A14, A15, A16, A17, A18),
                                                        names_to = "samples", # name of new column
                                                        values_to = "expression") # name of new column storing all the data
 
+###plot normalized and filtered data
+p3 <- violin_plot_transcriptomics(log2.cpm.filtered.norm.df.pivot, "filtered, TMM normalized")
 
-p3 <- ggplot(log2.cpm.jurkat.filtered.norm.df.pivot) +
-  aes(x=samples, y=expression, fill=samples) +
-  geom_violin(trim = FALSE, show.legend = FALSE) +
-  stat_summary(fun = "median", 
-               geom = "point", 
-               shape = 95, 
-               size = 10, 
-               color = "black", 
-               show.legend = FALSE) +
-  labs(y="log2 expression", x = "sample",
-       title="Log2 Counts per Million (CPM)",
-       subtitle="filtered, TMM normalized",
-       caption=paste0("produced on ", Sys.time())) +
-  theme_bw()
-
+###merge the three plots above, to compare
 plot_grid(p1, p2, p3, labels = c('A', 'B', 'C'), label_size = 12)
+
+#save for PROGENy input 
+write.csv(log2.cpm.filtered.norm.df, file = "normalised_expression_jurkat_wt_vs_a7_c9.csv", row.names = FALSE)
 
 
 ### multivariate analysis ----
-
-mydata.jurkat.df <- mutate(log2.cpm.jurkat.filtered.norm.df,
-                           jurkat.wt.AVG = (A13 + A11 + A12)/3, 
-                           jurkat.a7.AVG = (A10 + A14 + A15)/3,
-                           jurkat.c9.AVG = (A16 + A17 + A18)/3,
-                           #now make columns comparing each of the averages above 
-                           LogFC = (jurkat.c9.AVG - jurkat.wt.AVG)) %>% 
+#gets logFC
+data.df <- mutate(log2.cpm.filtered.norm.df,
+                  jurkat.wt.AVG = (A13 + A11 + A12)/3,
+                  jurkat.a7.AVG = (A10 + A14 + A15)/3,
+                  jurkat.c9.AVG = (A16 + A17 + A18)/3,
+                  #now make columns comparing each of the averages above
+                  LogFC = (jurkat.c9.AVG - jurkat.wt.AVG)) %>% 
   mutate_if(is.numeric, round, 2)
 
-datatable(mydata.jurkat.df[,c(1,2:10)], 
-          extensions = c('KeyTable', "FixedHeader"), 
-          filter = 'top',
-          options = list(keys = TRUE, 
-                         searchHighlight = TRUE, 
-                         pageLength = 10, 
-                         lengthMenu = c("10", "25", "50", "100")))
-write.csv(mydata.jurkat.df, file = "jurkat.log2.cpm.norm.wt.a7.c9.csv", quote = FALSE)
-
-groupjurkat <- targets.jurkat$phenotype
-groupjurkat <- factor(groupjurkat)
-
+group <- targets$group
+group <- factor(group)
 
 ### pca jurkat ----
+pca.res <- prcomp(t(log2.cpm.filtered.norm), scale.=F, retx=T)
+pc.var <- pca.res$sdev^2 # sdev^2 captures these eigenvalues from the PCA result
+pc.per <- round(pc.var/sum(pc.var)*100, 1) 
+pca.res.df <- as_tibble(pca.res$x)
 
-pca.res.jurkat <- prcomp(t(log2.cpm.jurkat.filtered.norm), scale.=F, retx=T)
-pc.var.jurkat <- pca.res.jurkat$sdev^2 # sdev^2 captures these eigenvalues from the PCA result
-pc.per.jurkat <- round(pc.var.jurkat/sum(pc.var.jurkat)*100, 1) 
-pca.res.jurkat.df <- as_tibble(pca.res.jurkat$x)
-
-
+#get colours for pca 
 dark_okabe <- darken(c("#E69F00", "#56B4E9", "#009E73"), amount = 0.2) 
 
-pca.plot.jurkat <- ggplot(pca.res.jurkat.df) +
-  aes(x=PC1, y=PC2, label=sampleLabels.jurkat, fill = groupjurkat, colour = groupjurkat, scale = TRUE) +
+#plot pca
+pca.plot <- ggplot(pca.res.df) +
+  aes(x=PC1, y=PC2, label=sampleLabels, fill = group, colour = group, scale = TRUE) +
   geom_point(size=7, stroke = 1, shape = 21) +
   #stat_ellipse() +
-  xlab(paste0("PC1 (",pc.per.jurkat[1],"%",")")) + 
-  ylab(paste0("PC2 (",pc.per.jurkat[3],"%",")")) +
-  labs(title="PCA plot",
-       caption=paste0("produced on ", Sys.time())) +
+  xlab(paste0("PC1 (",pc.per[1],"%",")")) + 
+  ylab(paste0("PC2 (",pc.per[2],"%",")")) +
   coord_fixed() +
-  theme_bw(base_size = 14) +
+  theme_bw(base_size = 18) +
   scale_fill_manual(labels = c("A7", "C9", "WT"), values = c("#E69F00", "#56B4E9", "#009E73")) +
   scale_colour_manual(labels = c("A7", "C9", "WT"), values = dark_okabe) +
   labs(fill = "Group", colour = "Group")
 
-pca.plot.jurkat
-
-# interactive version
-ggplotly(pca.plot.jurkat) 
-# 3D plot containing PC3 as well
-plot_ly(data = pca.res.jurkat.df, x = pca.res.jurkat.df$PC1, y = pca.res.jurkat.df$PC2, z = pca.res.jurkat.df$PC3, type = "scatter3d", label=sampleLabels.jurkat, color = groupjurkat)
+pca.plot
